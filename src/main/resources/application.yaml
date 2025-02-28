@@ -1,0 +1,5 @@
+spring:
+  config:
+    import: "optional:configserver:http://localhost:8089"
+  application:
+    name: webtools-api-gateway
