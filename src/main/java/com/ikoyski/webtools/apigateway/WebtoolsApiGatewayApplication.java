@@ -1,11 +1,9 @@
-package com.ikoyski.webtools.serviceregistry;
+package com.ikoyski.webtools.apigateway;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 
 @SpringBootApplication
-@EnableDiscoveryClient
 public class WebtoolsApiGatewayApplication {
 
 	public static void main(String[] args) {
