@@ -1,3 +1,9 @@
 spring:
   config:
-    import: "optional:configserver:http://192.168.0.164:8189"
+    import: "optional:configserver:${CONFIG_SERVER_URL}"
+  cloud:
+    config:
+      username: ${CONFIG_USER}
+      password: ${CONFIG_PASSWORD}
+  application:
+    name: webtools-api-gateway
