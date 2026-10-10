@@ -1,4 +1,6 @@
-package com.ikoyski.webtools.apigateway.config; 
+package com.ikoyski.webtools.apigateway.config;
+
+import java.net.InetSocketAddress;
 
 import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.context.annotation.Bean;
@@ -15,13 +17,12 @@ public class RateLimiterConfig {
     }
 
     private String resolveClientIp(ServerWebExchange exchange) {
-        String forwardedFor = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            // X-Forwarded-For can be a comma-separated chain; the first entry is the original client
-            return forwardedFor.split(",")[0].trim();
+        String cfIp = exchange.getRequest().getHeaders().getFirst("CF-Connecting-IP");
+        if (cfIp != null && !cfIp.isBlank()) {
+            return cfIp.trim();
         }
-        return exchange.getRequest().getRemoteAddress() != null
-                ? exchange.getRequest().getRemoteAddress().getAddress().getHostAddress()
-                : "unknown";
+        InetSocketAddress remote = exchange.getRequest().getRemoteAddress();
+        return remote != null ? remote.getAddress().getHostAddress() : "unknown";
     }
+    
 }
