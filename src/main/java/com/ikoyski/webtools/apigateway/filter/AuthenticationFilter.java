@@ -21,7 +21,8 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
 
     private final SecretKey secretKey;
 
-    public static class Config {}
+    public static class Config {
+    }
 
     public AuthenticationFilter(@Value("${security.jwt.token.secret-key}") String secret) {
         super(Config.class);
@@ -50,7 +51,8 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
 
             try {
                 // 3. PARSE AND VALIDATE THE TOKEN
-                // This checks the cryptographic signature and automatically checks if token is expired
+                // This checks the cryptographic signature and automatically checks if token is
+                // expired
                 Claims claims = Jwts.parserBuilder()
                         .setSigningKey(secretKey) // Re-verify signature using the secret
                         .build()
@@ -59,10 +61,16 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
 
                 // 4. EXTRACT DATA MATCHING YOUR BACKEND STRUCTURE
                 String userEmail = claims.getSubject(); // Reads user.getEmail() from backend
-                String userId = claims.getId();         // Reads user.getId() from backend
+                String userId = claims.getId(); // Reads user.getId() from backend
+
+                if (userEmail == null || userId == null) {
+                    exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                    return exchange.getResponse().setComplete();
+                }
 
                 // 5. FORWARD DATA DOWNSTREAM TO KANBAN SERVICES
-                // Mutate the request headers so Board/Column/Card controllers don't have to parse JWTs
+                // Mutate the request headers so Board/Column/Card controllers don't have to
+                // parse JWTs
                 ServerHttpRequest modifiedRequest = request.mutate()
                         .header("X-User-Email", userEmail)
                         .header("X-User-Id", userId)
