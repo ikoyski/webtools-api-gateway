@@ -63,4 +63,14 @@ public class RateLimiterConfig {
         };
     }
 
+    @Bean
+    public KeyResolver mcpUserKeyResolver() {
+        return exchange -> {
+            String userId = exchange.getRequest().getHeaders().getFirst("X-User-Id");
+            return (userId == null || userId.isBlank())
+                    ? Mono.empty()
+                    : Mono.just("mcp:user:" + userId.trim());
+        };
+    }
+
 }
