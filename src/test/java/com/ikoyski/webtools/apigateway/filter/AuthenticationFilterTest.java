@@ -85,6 +85,24 @@ class AuthenticationFilterTest {
 
         assertNull(forwarded.get());
         assertEquals(401, exchange.getResponse().getStatusCode().value());
+        assertEquals("Bearer error=\"invalid_token\"", exchange.getResponse().getHeaders().getFirst("WWW-Authenticate"));
+    }
+
+    @Test
+    void challengePointsToTheResourceMetadataWhenConfigured() {
+        var config = new AuthenticationFilter.Config();
+        config.setResourceMetadata("https://api.ikoyski.top/.well-known/oauth-protected-resource/kanban-mcp/mcp");
+        GatewayFilter withMetadata = new AuthenticationFilter(decoder).apply(config);
+        when(decoder.decode("bad")).thenReturn(Mono.error(new BadJwtException("expired")));
+
+        MockServerWebExchange noToken = exchange(null, null);
+        withMetadata.filter(noToken, chain).block();
+        MockServerWebExchange badToken = exchange("Bearer bad", null);
+        withMetadata.filter(badToken, chain).block();
+
+        String url = "resource_metadata=\"https://api.ikoyski.top/.well-known/oauth-protected-resource/kanban-mcp/mcp\"";
+        assertEquals("Bearer " + url, noToken.getResponse().getHeaders().getFirst("WWW-Authenticate"));
+        assertEquals("Bearer error=\"invalid_token\", " + url, badToken.getResponse().getHeaders().getFirst("WWW-Authenticate"));
     }
 
     @Test

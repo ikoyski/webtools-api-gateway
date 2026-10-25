@@ -44,7 +44,7 @@ public class RateLimiterConfig {
      * RequestRateLimiter in the filter list.
      *
      * AuthenticationFilter has already validated the JWT (signature and expiry) and replaced
-     * X-User-Id with the value of the token's jti claim, so there is no need to parse the token
+     * X-User-Id with the value of the token's uid claim, so there is no need to parse the token
      * again here. On a route without AuthenticationFilter this header would be client-controlled
      * and spoofable, so never attach this resolver to a public route.
      *

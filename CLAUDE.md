@@ -13,7 +13,7 @@ Guidance for working in **webtools-api-gateway**: a Spring Cloud Gateway (reacti
 docker compose up -d redis           # local Redis for the rate limiter
 ```
 
-Running needs a Config Server (default `http://localhost:8089`, `user`/`password`). Without one the app starts (the import is `optional:`) but has no routes and **fails at startup** because `security.jwt.token.secret-key` is unresolved.
+Running needs a Config Server (default `http://localhost:8089`, `user`/`password`). Without one the app starts (the import is `optional:`) but has no routes and **fails at startup** because `security.oauth2.issuer` / `security.oauth2.jwk-set-uri` are unresolved.
 
 ## Stack
 
@@ -25,7 +25,8 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 
 - `WebtoolsApiGatewayApplication`: entry point.
 - `config/RateLimiterConfig`: `ipKeyResolver` bean. Key = `CF-Connecting-IP` header, else remote address, else `"unknown"`.
-- `filter/AuthenticationFilter`: `AbstractGatewayFilterFactory`; validates `Authorization: Bearer <jwt>` through a `ReactiveJwtDecoder` (`config/JwtDecoderConfig`: RS256 only, keys from `security.oauth2.jwk-set-uri`, issuer `security.oauth2.issuer`), sets `X-User-Email` (JWT `email`) and `X-User-Id` (JWT `uid`) on the forwarded request. Any failure returns a `401` with `WWW-Authenticate: Bearer`.
+- `controller/OAuthMetadataController`: serves RFC 9728 protected-resource metadata (public, no auth) from `security.oauth2.*` properties; a `@RestController`, so it wins over gateway routes and needs no route.
+- `filter/AuthenticationFilter`: `AbstractGatewayFilterFactory`; validates `Authorization: Bearer <jwt>` through a `ReactiveJwtDecoder` (`config/JwtDecoderConfig`: RS256 only, keys from `security.oauth2.jwk-set-uri`, issuer `security.oauth2.issuer`), sets `X-User-Email` (JWT `email`) and `X-User-Id` (JWT `uid`) on the forwarded request. Any failure returns a `401`. The challenge is `Bearer`, plus `error="invalid_token"` when a token was sent and rejected, plus `resource_metadata="<url>"` when the route sets the `resourceMetadata` argument (MCP clients use it to find the authorization server).
 - `controller/FallbackController`: `/fallback/default` → `503`, `Retry-After: 20`, JSON body.
 
 **There are no routes in this repo.** Routes, token issuer settings, port, Eureka, Redis and Zipkin settings come from the external Config Server. Changing routing behavior usually means editing the Config Server repo, not this one.
@@ -57,7 +58,6 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 - **`X-User-*` only trusted behind the filter**: routes without `AuthenticationFilter` forward client-supplied identity headers as-is.
 - **`CF-Connecting-IP` is trusted blindly**: fine behind Cloudflare/cloudflared, spoofable otherwise. Don't weaken or remove without considering the exposure model.
 - **JWT claim mapping**: user id from `uid`, email from `email` (not `sub`, which is also the user id, and not `jti`, which is just a token id). If the auth server changes its claims, update the filter in the same change. A token missing either claim gets a `401`.
-- **Secret length**: HS256 key must be at least 32 bytes or `Keys.hmacShaKeyFor` throws at startup.
 - Keep only `spring-security-oauth2-jose` on the classpath. Adding `spring-boot-starter-oauth2-resource-server`, `spring-boot-starter-security` or `spring-security-config` switches on Spring Security's default filter chain in front of every route and breaks the gateway.
 - The decoder accepts RS256 only, so a forged HS256 token can never be accepted; don't widen it.
 

@@ -32,14 +32,7 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
-      <!-- Verifies RS256 access tokens from the auth server through its JWKS. Only the jose module,
-         not the resource-server starter: the starter would switch on Spring Security's default
-         "authenticate everything" filter chain in front of the gateway. -->
-    <dependency>
-      <groupId>org.springframework.security</groupId>
-      <artifactId>spring-security-oauth2-jose</artifactId>
-    </dependency>
-  </dependencies>
+    </dependencies>
   </dependencyManagement>
   <dependencies>
     <dependency>
@@ -82,6 +75,10 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-oauth2-jose</artifactId>
     </dependency>
   </dependencies>
 

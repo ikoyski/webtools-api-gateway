@@ -87,7 +87,7 @@ There are currently no unit or integration tests (`src/test` does not exist).
 java -jar target/webtools-api-gateway-0.0.1-SNAPSHOT.jar   # run the packaged jar
 ```
 
-With no profile set, the gateway looks for a Config Server at `http://localhost:8089` using `user` / `password`. Because the import is `optional:`, the app still starts if the server is unreachable, but it will then have **no routes and no JWT secret** and will fail on startup when `AuthenticationFilter` is created (the `security.jwt.token.secret-key` property is required).
+With no profile set, the gateway looks for a Config Server at `http://localhost:8089` using `user` / `password`. Because the import is `optional:`, the app still starts if the server is unreachable, but it will then have **no routes and no token issuer settings** and will fail on startup when the JWT decoder is created (the `security.oauth2.issuer` and `security.oauth2.jwk-set-uri` properties are required).
 
 ## Configuration
 
@@ -113,6 +113,8 @@ export CONFIG_PASSWORD=...
 | Property | Used by | Notes |
 |---|---|---|
 | `security.oauth2.issuer` | `JwtDecoderConfig` | **Required.** Issuer the tokens must carry in `iss`, for example `https://auth.ikoyski.top`. |
+| `security.oauth2.protected-resource` | `OAuthMetadataController` | Optional. Public URL of the MCP resource, for example `https://api.ikoyski.top/kanban-mcp/mcp`. When set, the gateway serves its OAuth protected-resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource[/<resource path>]`. |
+| `security.oauth2.scopes` | `OAuthMetadataController` | Optional, default `kanban.read,kanban.write`. Scopes advertised in that metadata. |
 | `security.oauth2.jwk-set-uri` | `JwtDecoderConfig` | **Required.** Where to fetch the auth server's public keys, for example `http://<auth host>:8084/oauth2/jwks` (internal) or `https://auth.ikoyski.top/oauth2/jwks`. Fetched lazily and cached; the gateway starts even if the auth server is down. |
 | `server.port` | Netty | Not set in this repo. Kubernetes manifest assumes **8190**. |
 | `spring.cloud.gateway.routes[*]` | Gateway | Route definitions |
@@ -148,7 +150,7 @@ spring:
 
 (Service name, path and limits above are illustrative; the real values are in the Config Server.)
 
-A public route simply omits `AuthenticationFilter`.
+A public route simply omits `AuthenticationFilter`. For an MCP route, pass the metadata URL so the 401 challenge tells clients where the authorization server is: `- name: AuthenticationFilter` with `args: { resourceMetadata: https://api.ikoyski.top/.well-known/oauth-protected-resource/kanban-mcp/mcp }`.
 
 ## Docker
 
