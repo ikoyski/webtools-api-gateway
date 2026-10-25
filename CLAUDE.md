@@ -17,7 +17,7 @@ Running needs a Config Server (default `http://localhost:8089`, `user`/`password
 
 ## Stack
 
-Java 21, Spring Boot 3.4.2, Spring Cloud 2024.0.0, WebFlux/Netty, Eureka client, Config client, Resilience4j (reactor), reactive Redis, Micrometer Tracing (Brave) + Zipkin, jjwt 0.11.5.
+Java 21, Spring Boot 3.4.2, Spring Cloud 2024.0.0, WebFlux/Netty, Eureka client, Config client, Resilience4j (reactor), reactive Redis, Micrometer Tracing (Brave) + Zipkin, Spring Security OAuth2 JOSE (JWKS verification).
 
 ## Architecture
 
@@ -25,10 +25,10 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 
 - `WebtoolsApiGatewayApplication`: entry point.
 - `config/RateLimiterConfig`: `ipKeyResolver` bean. Key = `CF-Connecting-IP` header, else remote address, else `"unknown"`.
-- `filter/AuthenticationFilter`: `AbstractGatewayFilterFactory`; validates `Authorization: Bearer <jwt>` with an HMAC key from `security.jwt.token.secret-key`, sets `X-User-Email` (JWT `sub`) and `X-User-Id` (JWT `jti`) on the forwarded request. Any failure returns an empty-body `401`.
+- `filter/AuthenticationFilter`: `AbstractGatewayFilterFactory`; validates `Authorization: Bearer <jwt>` through a `ReactiveJwtDecoder` (`config/JwtDecoderConfig`: RS256 only, keys from `security.oauth2.jwk-set-uri`, issuer `security.oauth2.issuer`), sets `X-User-Email` (JWT `email`) and `X-User-Id` (JWT `uid`) on the forwarded request. Any failure returns a `401` with `WWW-Authenticate: Bearer`.
 - `controller/FallbackController`: `/fallback/default` → `503`, `Retry-After: 20`, JSON body.
 
-**There are no routes in this repo.** Routes, JWT secret, port, Eureka, Redis and Zipkin settings come from the external Config Server. Changing routing behavior usually means editing the Config Server repo, not this one.
+**There are no routes in this repo.** Routes, token issuer settings, port, Eureka, Redis and Zipkin settings come from the external Config Server. Changing routing behavior usually means editing the Config Server repo, not this one.
 
 ### Referencing beans from route config
 
@@ -56,9 +56,10 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 - **Port mismatch**: Dockerfile `EXPOSE 8080`; Kubernetes manifest uses `8190`; the real port is `server.port` from the Config Server. Keep them in sync when changing any.
 - **`X-User-*` only trusted behind the filter**: routes without `AuthenticationFilter` forward client-supplied identity headers as-is.
 - **`CF-Connecting-IP` is trusted blindly**: fine behind Cloudflare/cloudflared, spoofable otherwise. Don't weaken or remove without considering the exposure model.
-- **JWT claim mapping**: email from `sub`, user id from `jti`. If the auth service changes its claims, update the filter in the same change. A null claim makes `header(...)` throw and returns `401`.
+- **JWT claim mapping**: user id from `uid`, email from `email` (not `sub`, which is also the user id, and not `jti`, which is just a token id). If the auth server changes its claims, update the filter in the same change. A token missing either claim gets a `401`.
 - **Secret length**: HS256 key must be at least 32 bytes or `Keys.hmacShaKeyFor` throws at startup.
-- jjwt is 0.11.5 (`Jwts.parserBuilder()` API); don't copy 0.12.x snippets.
+- Keep only `spring-security-oauth2-jose` on the classpath. Adding `spring-boot-starter-oauth2-resource-server`, `spring-boot-starter-security` or `spring-security-config` switches on Spring Security's default filter chain in front of every route and breaks the gateway.
+- The decoder accepts RS256 only, so a forged HS256 token can never be accepted; don't widen it.
 
 ## CI/CD
 

@@ -1,21 +1,21 @@
 # Webtools API Gateway
 
-Reactive edge gateway for the Webtools microservice ecosystem, built on **Spring Cloud Gateway** (WebFlux / Netty). It is the single public entry point: it authenticates callers with JWTs, rate-limits by client IP, routes to downstream services discovered through Eureka, and degrades gracefully when a service is down.
+Reactive edge gateway for the Webtools microservice ecosystem, built on **Spring Cloud Gateway** (WebFlux / Netty). It is the single public entry point: it authenticates callers with access tokens issued by the auth server, rate-limits (per client IP on public routes, per user on authenticated ones), routes to downstream services discovered through Eureka, and degrades gracefully when a service is down.
 
-The gateway itself is small and holds no routes. **Route definitions, the JWT secret, Redis settings and the server port all come from the Spring Cloud Config Server at startup** (see [Configuration](#configuration)).
+The gateway itself is small and holds no routes. **Route definitions, the token issuer settings, Redis settings and the server port all come from the Spring Cloud Config Server at startup** (see [Configuration](#configuration)).
 
 ## Features
 
 | Capability | Implementation |
 |---|---|
 | Routing & service discovery | Spring Cloud Gateway + Netflix Eureka client (`lb://` URIs); routes defined in the Config Server |
-| Authentication | `AuthenticationFilter` validates HS-signed JWT bearer tokens and forwards the user identity downstream |
+| Authentication | `AuthenticationFilter` verifies RS256 access tokens from the auth server (public keys fetched from its JWKS) and forwards the user identity downstream |
 | Rate limiting | Redis-backed `RequestRateLimiter` using the `ipKeyResolver` bean (per client IP) |
 | Resilience | Resilience4j circuit breaker; `/fallback/default` returns `503` with `Retry-After: 20` |
 | Observability | Spring Boot Actuator, Micrometer Tracing (Brave bridge), Zipkin reporter |
 | Externalized config | Spring Cloud Config client, imported as an `optional:` config source |
 
-**Stack:** Java 21 · Spring Boot 3.4.2 · Spring Cloud 2024.0.0 · jjwt 0.11.5 · Maven (wrapper included)
+**Stack:** Java 21 · Spring Boot 3.4.2 · Spring Cloud 2024.0.0 · Spring Security OAuth2 JOSE (JWKS) · Maven (wrapper included)
 
 ## Architecture
 
@@ -35,9 +35,9 @@ The gateway itself is small and holds no routes. **Route definitions, the JWT se
 ### Request flow
 
 1. **Rate limit**: `RateLimiterConfig.ipKeyResolver` keys requests by the `CF-Connecting-IP` header when present, otherwise by the TCP remote address (`unknown` if unavailable).
-2. **Authentication** (routes that opt in): `AuthenticationFilter` requires `Authorization: Bearer <jwt>`. It verifies the signature and expiry with the shared secret, then sets two request headers for downstream services:
-   - `X-User-Email` ← JWT `sub`
-   - `X-User-Id` ← JWT `jti`
+2. **Authentication** (routes that opt in): `AuthenticationFilter` requires `Authorization: Bearer <jwt>`. It verifies the RS256 signature (against the auth server's JWKS), the expiry and the issuer, then sets two request headers for downstream services:
+   - `X-User-Email` ← JWT `email` claim
+   - `X-User-Id` ← JWT `uid` claim
    
    Missing, malformed, tampered or expired tokens get a bare `401 Unauthorized` (empty body).
 3. **Routing**: the request is forwarded to the matching downstream service.
@@ -75,7 +75,7 @@ There are currently no unit or integration tests (`src/test` does not exist).
 ### Prerequisites
 
 - JDK 21
-- A reachable **Spring Cloud Config Server** that serves `webtools-api-gateway` config (routes, JWT secret, port, Eureka and Redis settings)
+- A reachable **Spring Cloud Config Server** that serves `webtools-api-gateway` config (routes, token issuer settings, port, Eureka and Redis settings)
 - **Redis** for rate limiting (`docker compose up -d redis` starts one on `6379`)
 - Eureka and Zipkin if you want discovery-based routing and tracing locally
 
@@ -112,7 +112,8 @@ export CONFIG_PASSWORD=...
 
 | Property | Used by | Notes |
 |---|---|---|
-| `security.jwt.token.secret-key` | `AuthenticationFilter` | **Required.** HMAC secret; must match the service that issues the JWTs. Must be at least 32 bytes for HS256. |
+| `security.oauth2.issuer` | `JwtDecoderConfig` | **Required.** Issuer the tokens must carry in `iss`, for example `https://auth.ikoyski.top`. |
+| `security.oauth2.jwk-set-uri` | `JwtDecoderConfig` | **Required.** Where to fetch the auth server's public keys, for example `http://<auth host>:8084/oauth2/jwks` (internal) or `https://auth.ikoyski.top/oauth2/jwks`. Fetched lazily and cached; the gateway starts even if the auth server is down. |
 | `server.port` | Netty | Not set in this repo. Kubernetes manifest assumes **8190**. |
 | `spring.cloud.gateway.routes[*]` | Gateway | Route definitions |
 | `eureka.client.*` | Discovery | Service registry location |
@@ -147,7 +148,7 @@ spring:
 
 (Service name, path and limits above are illustrative; the real values are in the Config Server.)
 
-A public route such as login or registration simply omits `AuthenticationFilter`.
+A public route simply omits `AuthenticationFilter`.
 
 ## Docker
 
@@ -182,5 +183,5 @@ docker run --rm -p 8190:8190 \
 - **Spoofable client IP.** `ipKeyResolver` trusts the `CF-Connecting-IP` header unconditionally. That is safe only when the gateway is reachable exclusively through Cloudflare (e.g. a Cloudflare tunnel). If it is reachable directly, a client can rotate that header to evade rate limits.
 - **Identity headers on unprotected routes.** Only routes with `AuthenticationFilter` overwrite `X-User-Email` / `X-User-Id`. On other routes, client-supplied values pass through untouched. Do not rely on them there.
 - **Downstream exposure.** Services behind the gateway must not be directly reachable from untrusted networks, or the identity headers can be forged.
-- **Secrets.** The JWT secret and Config Server credentials must never be committed. The default profile's `user` / `password` is for local development only.
-- **Token claims.** `AuthenticationFilter` reads the user's email from `sub` and the user ID from `jti`. Tokens issued with different claim conventions will produce a null header and an error (and a `401`).
+- **Secrets.** Config Server credentials must never be committed. There is no signing secret in the gateway: it only holds the auth server's public keys. The default profile's `user` / `password` is for local development only.
+- **Token claims.** `AuthenticationFilter` reads the user ID from the `uid` claim and the email from the `email` claim. A token missing either, or not signed with RS256 by the configured issuer, gets a `401`.
