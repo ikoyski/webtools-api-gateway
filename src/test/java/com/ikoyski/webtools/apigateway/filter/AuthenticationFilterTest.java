@@ -92,7 +92,7 @@ class AuthenticationFilterTest {
                 MockServerHttpRequest.get("/kanban-backend/v1/boards").header("Authorization", "Bearer read-only"));
         protectedFilter.filter(read, chain).block();
         assertNotNull(forwarded.get());
-        assertEquals(200, read.getResponse().getStatusCode() == null ? 200 : read.getResponse().getStatusCode().value());
+        assertEquals(List.of("central-user-id"), forwarded.get().getRequest().getHeaders().get("X-User-Id"));
 
         forwarded.set(null);
         MockServerWebExchange write = MockServerWebExchange.from(
