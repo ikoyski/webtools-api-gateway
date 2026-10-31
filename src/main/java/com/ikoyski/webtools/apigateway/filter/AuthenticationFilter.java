@@ -14,7 +14,9 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Arrays;
 
 import reactor.core.publisher.Mono;
 
@@ -93,8 +95,9 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     private Mono<Void> forward(ServerWebExchange exchange, GatewayFilterChain chain, Config config, Jwt jwt) {
         String userId = jwt.getClaimAsString(USER_ID_CLAIM);
         String email = jwt.getClaimAsString(EMAIL_CLAIM);
-        if (isBlank(userId) || isBlank(email)) {
-            log.debug("JWT rejected: missing uid or email claim");
+        String subject = jwt.getSubject();
+        if (isBlank(userId) || isBlank(email) || !userId.equals(subject)) {
+            log.debug("JWT rejected: missing identity claims or uid does not match sub");
             return unauthorized(exchange, config, true);
         }
 
@@ -104,17 +107,14 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
             return unauthorized(exchange, config, true);
         }
 
+        List<String> scopes = readScopes(jwt);
         String requiredScope = requiredScope(exchange, config);
-        if (!isBlank(requiredScope)) {
-            List<String> scopes = jwt.getClaimAsStringList("scope");
-            if (scopes == null || !scopes.contains(requiredScope.trim())) {
-                return insufficientScope(exchange, config, requiredScope.trim());
-            }
+        if (!isBlank(requiredScope) && !scopes.contains(requiredScope.trim())) {
+            return insufficientScope(exchange, config, requiredScope.trim());
         }
 
         String displayName = jwt.getClaimAsString("name");
         String avatarUrl = jwt.getClaimAsString("picture");
-        List<String> scopes = jwt.getClaimAsStringList("scope");
         ServerHttpRequest modified = exchange.getRequest().mutate()
                 .headers(headers -> {
                     headers.set("X-User-Id", userId);
@@ -128,6 +128,22 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
                 })
                 .build();
         return chain.filter(exchange.mutate().request(modified).build());
+    }
+
+    private static List<String> readScopes(Jwt jwt) {
+        Object claim = jwt.getClaims().get("scope");
+        if (claim instanceof String value) {
+            if (value.isBlank()) return List.of();
+            return Arrays.stream(value.trim().split("\\s+")).filter(scope -> !scope.isBlank()).toList();
+        }
+        if (claim instanceof Collection<?> values) {
+            return values.stream()
+                    .filter(String.class::isInstance)
+                    .map(String.class::cast)
+                    .filter(scope -> !scope.isBlank())
+                    .toList();
+        }
+        return List.of();
     }
 
     private static String requiredScope(ServerWebExchange exchange, Config config) {
