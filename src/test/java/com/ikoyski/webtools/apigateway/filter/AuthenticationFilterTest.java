@@ -100,7 +100,7 @@ class AuthenticationFilterTest {
         protectedFilter.filter(write, chain).block();
         assertNull(forwarded.get());
         assertEquals(403, write.getResponse().getStatusCode().value());
-        assertEquals("Bearer error=\\"insufficient_scope\\", scope=\\"kanban.write\\"",
+        assertEquals("Bearer error=\"insufficient_scope\", scope=\"kanban.write\"",
                 write.getResponse().getHeaders().getFirst("WWW-Authenticate"));
 
         MockServerWebExchange mismatch = MockServerWebExchange.from(
