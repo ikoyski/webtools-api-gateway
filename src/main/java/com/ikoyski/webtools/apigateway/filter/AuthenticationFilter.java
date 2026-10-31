@@ -143,11 +143,11 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     }
 
     private static Mono<Void> insufficientScope(ServerWebExchange exchange, Config config, String requiredScope) {
-        StringBuilder challenge = new StringBuilder("Bearer error=\\"insufficient_scope\\", scope=\\\"")
+        StringBuilder challenge = new StringBuilder("Bearer error=\\"insufficient_scope\\", scope=\\"")
                 .append(requiredScope).append('"');
         String metadata = config == null ? null : config.getResourceMetadata();
         if (!isBlank(metadata)) {
-            challenge.append(", resource_metadata=\\\"").append(metadata.trim()).append('"');
+            challenge.append(", resource_metadata=\\"").append(metadata.trim()).append('"');
         }
         exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
         exchange.getResponse().getHeaders().set(HttpHeaders.WWW_AUTHENTICATE, challenge.toString());
