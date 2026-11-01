@@ -75,6 +75,12 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     @Override
     public GatewayFilter apply(Config config) {
         return (exchange, chain) -> {
+            // CORS preflight requests are unauthenticated by design. Let the Gateway's
+            // global CORS handler process OPTIONS before enforcing bearer authentication.
+            if (exchange.getRequest().getMethod() == org.springframework.http.HttpMethod.OPTIONS) {
+                return chain.filter(exchange);
+            }
+
             String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
             if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
                 return unauthorized(exchange, config, false);
