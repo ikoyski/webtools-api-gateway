@@ -9,7 +9,7 @@ Guidance for working in **webtools-api-gateway**: a Spring Cloud Gateway (reacti
 ./mvnw clean package -DskipTests     # jar only (target/webtools-api-gateway-0.0.1-SNAPSHOT.jar)
 ./mvnw spring-boot:run               # run, default profile
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=private
-./mvnw test                          # no tests exist yet (src/test is absent)
+./mvnw test                          # run gateway tests
 docker compose up -d redis           # local Redis for the rate limiter
 ```
 
@@ -61,7 +61,7 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 - Keep `AuthenticationFilter` stateless and header-based; downstream services are expected to trust `X-User-*` only when deployed behind this gateway.
 - Treat `uid` as the central identity UUID (same identity as JWT `sub`), not a Kanban-specific user ID.
 - Configure exact per-route audience and read/write scopes for every protected first-party application. Never use one app's audience or scopes on another app's route.
-- Add tests under `src/test/java` using `spring-boot-starter-test` (the only test dependency; add `reactor-test`/`WebTestClient` support as needed).
+- Tests live under `src/test/java`; currently two test classes cover gateway filter/config behavior. Add regression tests for every authorization or routing change using `spring-boot-starter-test` and `reactor-test`/`WebTestClient` as appropriate.
 
 ## Gotchas
 
