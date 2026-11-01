@@ -65,6 +65,19 @@ class AuthenticationFilterTest {
     }
 
     @Test
+    void optionsPreflightDoesNotRequireBearerToken() {
+        MockServerWebExchange preflight = MockServerWebExchange.from(
+                MockServerHttpRequest.options("/kanban-backend/v1/boards")
+                        .header("Origin", "https://pages.ikoyski.top")
+                        .header("Access-Control-Request-Method", "GET"));
+
+        filter.filter(preflight, chain).block();
+
+        assertNotNull(forwarded.get());
+        assertEquals("OPTIONS", forwarded.get().getRequest().getMethod().name());
+    }
+
+    @Test
     void validTokenForwardsIdentityAndReplacesClientSuppliedHeader() {
         when(decoder.decode("abc")).thenReturn(Mono.just(jwt("user-1", "ann@example.com")));
 
