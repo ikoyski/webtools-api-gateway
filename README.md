@@ -9,7 +9,7 @@ The gateway itself is small and holds no routes. **Route definitions, the token 
 | Capability | Implementation |
 |---|---|
 | Routing & service discovery | Spring Cloud Gateway + Netflix Eureka client (`lb://` URIs); routes defined in the Config Server |
-| Authentication | `AuthenticationFilter` verifies RS256 access tokens from the auth server (public keys fetched from its JWKS) and forwards the user identity downstream |
+| Authentication and authorization | `AuthenticationFilter` verifies RS256 tokens, issuer, configured resource audience and method-specific app scopes, then forwards trusted identity claims |
 | Rate limiting | Redis-backed `RequestRateLimiter` using the `ipKeyResolver` bean (per client IP) |
 | Resilience | Resilience4j circuit breaker; `/fallback/default` returns `503` with `Retry-After: 20` |
 | Observability | Spring Boot Actuator, Micrometer Tracing (Brave bridge), Zipkin reporter |
@@ -35,11 +35,14 @@ The gateway itself is small and holds no routes. **Route definitions, the token 
 ### Request flow
 
 1. **Rate limit**: `RateLimiterConfig.ipKeyResolver` keys requests by the `CF-Connecting-IP` header when present, otherwise by the TCP remote address (`unknown` if unavailable).
-2. **Authentication** (routes that opt in): `AuthenticationFilter` requires `Authorization: Bearer <jwt>`. It verifies the RS256 signature (against the auth server's JWKS), the expiry and the issuer, then sets two request headers for downstream services:
-   - `X-User-Email` ← JWT `email` claim
-   - `X-User-Id` ← JWT `uid` claim
-   
-   Missing, malformed, tampered or expired tokens get a bare `401 Unauthorized` (empty body).
+2. **Authentication and authorization** (routes that opt in): `AuthenticationFilter` verifies the RS256 signature, issuer and expiry. When configured for the route, it also requires the exact resource `aud` and method-specific scopes (`readScope` for GET/HEAD/OPTIONS; `writeScope` for other methods). It then replaces untrusted incoming headers with verified identity claims:
+   - `X-User-Id` ← JWT `uid` (the central identity UUID; equal to `sub`)
+   - `X-User-Email` ← JWT `email`
+   - `X-User-Display-Name` ← JWT `name` when present
+   - `X-User-Avatar-Url` ← JWT `picture` when present
+   - `X-User-Scopes` ← JWT `scope` values
+
+   Invalid tokens or audience mismatch get `401`; an authenticated token without the required method scope gets `403 insufficient_scope`.
 3. **Routing**: the request is forwarded to the matching downstream service.
 4. **Fallback**: if a route's circuit breaker trips, it forwards to `/fallback/default`:
    ```json
@@ -150,7 +153,19 @@ spring:
 
 (Service name, path and limits above are illustrative; the real values are in the Config Server.)
 
-A public route simply omits `AuthenticationFilter`. For an MCP route, pass the metadata URL so the 401 challenge tells clients where the authorization server is: `- name: AuthenticationFilter` with `args: { resourceMetadata: https://api.ikoyski.top/.well-known/oauth-protected-resource/kanban-mcp/mcp }`.
+A public route simply omits `AuthenticationFilter`. For every protected application route, configure its own exact resource audience and read/write scopes. Example for Kanban:
+
+```yaml
+          filters:
+            - name: AuthenticationFilter
+              args:
+                audience: https://api.example.com/kanban-backend
+                readScope: kanban.read
+                writeScope: kanban.write
+            # rate limiter and circuit breaker follow
+```
+
+The audience must exactly match the resource URI assigned to the Kanban OAuth client in the Auth Server. Use different audience and scope names for each application (for example, Ipon uses `ipon.read` / `ipon.write`). For an MCP route, also configure `resourceMetadata` so a 401 challenge tells MCP clients where the authorization server is.
 
 ## Docker
 
@@ -183,7 +198,8 @@ docker run --rm -p 8190:8190 \
 ## Security notes
 
 - **Spoofable client IP.** `ipKeyResolver` trusts the `CF-Connecting-IP` header unconditionally. That is safe only when the gateway is reachable exclusively through Cloudflare (e.g. a Cloudflare tunnel). If it is reachable directly, a client can rotate that header to evade rate limits.
-- **Identity headers on unprotected routes.** Only routes with `AuthenticationFilter` overwrite `X-User-Email` / `X-User-Id`. On other routes, client-supplied values pass through untouched. Do not rely on them there.
+- **Identity headers on unprotected routes.** Only routes with `AuthenticationFilter` overwrite `X-User-*`. On other routes, client-supplied values pass through untouched. Do not rely on them there.
+- **Configure route authorization.** The new audience and scope checks are opt-in route arguments for backwards compatibility. A protected application route is not isolated by audience/scope until its private Config Server route supplies `audience`, `readScope` and `writeScope`. Do not leave first-party application routes without these values.
 - **Downstream exposure.** Services behind the gateway must not be directly reachable from untrusted networks, or the identity headers can be forged.
 - **Secrets.** Config Server credentials must never be committed. There is no signing secret in the gateway: it only holds the auth server's public keys. The default profile's `user` / `password` is for local development only.
-- **Token claims.** `AuthenticationFilter` reads the user ID from the `uid` claim and the email from the `email` claim. A token missing either, or not signed with RS256 by the configured issuer, gets a `401`.
+- **Token claims.** `uid` is the central identity UUID (same as `sub`), not an application-specific user ID. Email is required; name and picture are optional. A token missing uid/email, with a wrong issuer/signature/audience, or expired gets a `401`. Routes configured with read/write scopes return `403 insufficient_scope` when the required scope is absent.

@@ -42,6 +42,17 @@ class AuthenticationFilterTest {
         return builder.build();
     }
 
+    private static Jwt resourceJwt(String audience, Object scopes) {
+        return Jwt.withTokenValue("resource-token")
+                .header("alg", "RS256")
+                .subject("central-user-id")
+                .claim("uid", "central-user-id")
+                .claim("email", "ann@example.com")
+                .audience(List.of(audience))
+                .claim("scope", scopes)
+                .build();
+    }
+
     private static MockServerWebExchange exchange(String authorization, String spoofedUserId) {
         MockServerHttpRequest.BaseBuilder<?> request = MockServerHttpRequest.get("/kanban-backend/v1/boards");
         if (authorization != null) {
@@ -63,6 +74,77 @@ class AuthenticationFilterTest {
         var headers = forwarded.get().getRequest().getHeaders();
         assertEquals(List.of("user-1"), headers.get("X-User-Id"));
         assertEquals(List.of("ann@example.com"), headers.get("X-User-Email"));
+    }
+
+    @Test
+    void configuredResourceAudienceAndMethodScopesAreEnforced() {
+        var config = new AuthenticationFilter.Config();
+        config.setAudience("https://api.example.com/kanban");
+        config.setReadScope("kanban.read");
+        config.setWriteScope("kanban.write");
+        GatewayFilter protectedFilter = new AuthenticationFilter(decoder).apply(config);
+        when(decoder.decode("read-only")).thenReturn(Mono.just(
+                resourceJwt("https://api.example.com/kanban", List.of("kanban.read"))));
+        when(decoder.decode("wrong-audience")).thenReturn(Mono.just(
+                resourceJwt("https://api.example.com/ipon", List.of("kanban.read", "kanban.write"))));
+
+        MockServerWebExchange read = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/kanban-backend/v1/boards").header("Authorization", "Bearer read-only"));
+        protectedFilter.filter(read, chain).block();
+        assertNotNull(forwarded.get());
+        assertEquals(List.of("central-user-id"), forwarded.get().getRequest().getHeaders().get("X-User-Id"));
+
+        forwarded.set(null);
+        MockServerWebExchange write = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/kanban-backend/v1/boards").header("Authorization", "Bearer read-only"));
+        protectedFilter.filter(write, chain).block();
+        assertNull(forwarded.get());
+        assertEquals(403, write.getResponse().getStatusCode().value());
+        assertEquals("Bearer error=\"insufficient_scope\", scope=\"kanban.write\"",
+                write.getResponse().getHeaders().getFirst("WWW-Authenticate"));
+
+        MockServerWebExchange mismatch = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/kanban-backend/v1/boards").header("Authorization", "Bearer wrong-audience"));
+        protectedFilter.filter(mismatch, chain).block();
+        assertNull(forwarded.get());
+        assertEquals(401, mismatch.getResponse().getStatusCode().value());
+    }
+
+    @Test
+    void rejectsTokenWhenUidDoesNotMatchSubject() {
+        Jwt mismatch = Jwt.withTokenValue("mismatch")
+                .header("alg", "RS256")
+                .subject("different-central-id")
+                .claim("uid", "central-user-id")
+                .claim("email", "ann@example.com")
+                .build();
+        when(decoder.decode("mismatch")).thenReturn(Mono.just(mismatch));
+        MockServerWebExchange exchange = exchange("Bearer mismatch", null);
+
+        filter.filter(exchange, chain).block();
+
+        assertNull(forwarded.get());
+        assertEquals(401, exchange.getResponse().getStatusCode().value());
+    }
+
+    @Test
+    void acceptsSpaceDelimitedScopeClaimAndForwardsNormalizedScopes() {
+        var config = new AuthenticationFilter.Config();
+        config.setAudience("https://api.example.com/kanban");
+        config.setReadScope("kanban.read");
+        config.setWriteScope("kanban.write");
+        GatewayFilter protectedFilter = new AuthenticationFilter(decoder).apply(config);
+        when(decoder.decode("string-scopes")).thenReturn(Mono.just(
+                resourceJwt("https://api.example.com/kanban", "kanban.read kanban.write")));
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/kanban-backend/v1/boards")
+                        .header("Authorization", "Bearer string-scopes"));
+
+        protectedFilter.filter(exchange, chain).block();
+
+        assertNotNull(forwarded.get());
+        assertEquals(List.of("kanban.read kanban.write"),
+                forwarded.get().getRequest().getHeaders().get("X-User-Scopes"));
     }
 
     @Test

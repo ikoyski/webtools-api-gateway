@@ -26,7 +26,7 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 - `WebtoolsApiGatewayApplication`: entry point.
 - `config/RateLimiterConfig`: `ipKeyResolver` bean. Key = `CF-Connecting-IP` header, else remote address, else `"unknown"`.
 - `controller/OAuthMetadataController`: serves RFC 9728 protected-resource metadata (public, no auth) from `security.oauth2.*` properties; a `@RestController`, so it wins over gateway routes and needs no route.
-- `filter/AuthenticationFilter`: `AbstractGatewayFilterFactory`; validates `Authorization: Bearer <jwt>` through a `ReactiveJwtDecoder` (`config/JwtDecoderConfig`: RS256 only, keys from `security.oauth2.jwk-set-uri`, issuer `security.oauth2.issuer`), sets `X-User-Email` (JWT `email`) and `X-User-Id` (JWT `uid`) on the forwarded request. Any failure returns a `401`. The challenge is `Bearer`, plus `error="invalid_token"` when a token was sent and rejected, plus `resource_metadata="<url>"` when the route sets the `resourceMetadata` argument (MCP clients use it to find the authorization server).
+- `filter/AuthenticationFilter`: `AbstractGatewayFilterFactory`; validates `Authorization: Bearer <jwt>` through a `ReactiveJwtDecoder` (`config/JwtDecoderConfig`: RS256 only, JWKS from `security.oauth2.jwk-set-uri`, issuer `security.oauth2.issuer`). Route args can require `audience`, `readScope` and `writeScope`; safe methods require the read scope, mutating methods require the write scope. It replaces `X-User-Id`, `X-User-Email`, `X-User-Display-Name`, `X-User-Avatar-Url` and `X-User-Scopes` with values derived from verified claims. Missing/invalid token or audience mismatch returns 401; missing scope returns 403 `insufficient_scope`. `resourceMetadata` adds RFC 9728 metadata to the bearer challenge.
 - `controller/FallbackController`: `/fallback/default` → `503`, `Retry-After: 20`, JSON body.
 
 **There are no routes in this repo.** Routes, token issuer settings, port, Eureka, Redis and Zipkin settings come from the external Config Server. Changing routing behavior usually means editing the Config Server repo, not this one.
@@ -34,6 +34,15 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 ### Referencing beans from route config
 
 - JWT filter: `- AuthenticationFilter` (the factory name is the class name, since it doesn't end in `GatewayFilterFactory`; renaming the class breaks every route that uses it).
+- Protected app routes must configure all three resource-boundary args:
+  ```yaml
+  - name: AuthenticationFilter
+    args:
+      audience: https://api.example.com/kanban-backend
+      readScope: kanban.read
+      writeScope: kanban.write
+  ```
+  Match the audience exactly to the resource URI configured for that OAuth client in the Identity Server. Use separate API audiences and scope names for every app. The args are optional in code for legacy routes, so do not mistake an unconfigured filter for per-resource authorization.
 - Rate limiter key: `key-resolver: "#{@ipKeyResolver}"`; renaming the bean breaks routes.
 - Circuit breaker fallback: `fallbackUri: forward:/fallback/default`.
 
@@ -49,7 +58,9 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 - Gateway filters are written as `AbstractGatewayFilterFactory` components with a nested `Config` class.
 - Package root: `com.ikoyski.webtools.apigateway`; standard Maven layout; tabs/4-space mix exists in current files, so match the surrounding file.
 - `pom.xml` is auto-sorted by `sortpom-maven-plugin` (`sort` goal, `verify` phase). Running `verify` may rewrite `pom.xml`; commit that result and don't hand-reorder.
-- Keep `AuthenticationFilter` stateless and header-based; downstream services are expected to trust `X-User-*` and not parse JWTs.
+- Keep `AuthenticationFilter` stateless and header-based; downstream services are expected to trust `X-User-*` only when deployed behind this gateway.
+- Treat `uid` as the central identity UUID (same identity as JWT `sub`), not a Kanban-specific user ID.
+- Configure exact per-route audience and read/write scopes for every protected first-party application. Never use one app's audience or scopes on another app's route.
 - Add tests under `src/test/java` using `spring-boot-starter-test` (the only test dependency; add `reactor-test`/`WebTestClient` support as needed).
 
 ## Gotchas
@@ -57,7 +68,7 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 - **Port mismatch**: Dockerfile `EXPOSE 8080`; Kubernetes manifest uses `8190`; the real port is `server.port` from the Config Server. Keep them in sync when changing any.
 - **`X-User-*` only trusted behind the filter**: routes without `AuthenticationFilter` forward client-supplied identity headers as-is.
 - **`CF-Connecting-IP` is trusted blindly**: fine behind Cloudflare/cloudflared, spoofable otherwise. Don't weaken or remove without considering the exposure model.
-- **JWT claim mapping**: user id from `uid`, email from `email` (not `sub`, which is also the user id, and not `jti`, which is just a token id). If the auth server changes its claims, update the filter in the same change. A token missing either claim gets a `401`.
+- **JWT claim mapping**: user id from `uid` (the central UUID, also `sub`), email from `email`, display name from `name`, avatar from `picture`, scopes from `scope`. If the Identity Server changes its claims, update the filter and resource servers in the same change. A token missing uid/email gets a 401.
 - Keep only `spring-security-oauth2-jose` on the classpath. Adding `spring-boot-starter-oauth2-resource-server`, `spring-boot-starter-security` or `spring-security-config` switches on Spring Security's default filter chain in front of every route and breaks the gateway.
 - The decoder accepts RS256 only, so a forged HS256 token can never be accepted; don't widen it.
 
