@@ -6,7 +6,7 @@ spring:
       username: ${CONFIG_USER}
       password: ${CONFIG_PASSWORD}
   application:
-    name: webtools-test-api-gateway
+    name: webtools-api-gateway
 
 logging:
   structured:
