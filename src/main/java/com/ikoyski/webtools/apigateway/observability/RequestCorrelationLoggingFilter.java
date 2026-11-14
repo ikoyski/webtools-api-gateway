@@ -47,7 +47,7 @@ public class RequestCorrelationLoggingFilter implements GlobalFilter, Ordered {
         ServerWebExchange correlatedExchange = exchange.mutate().request(request).build();
         correlatedExchange.getResponse().getHeaders().set(REQUEST_ID_HEADER, requestId);
 
-        String method = request.getMethodValue();
+        String method = request.getMethod() == null ? "UNKNOWN" : request.getMethod().name();
         String path = request.getURI().getRawPath();
         Route route = exchange.getAttribute(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR);
         String routeId = route == null ? "unmatched" : route.getId();
