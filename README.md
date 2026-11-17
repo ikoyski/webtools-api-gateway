@@ -52,6 +52,12 @@ The gateway itself is small and holds no routes. **Route definitions, the token 
 
 > Downstream services should trust `X-User-Email` / `X-User-Id` **only** on routes protected by `AuthenticationFilter`, and should not be reachable except through the gateway. See [Security notes](#security-notes).
 
+## Homelab MCP boundary
+
+The Homelab Management MCP service is a separate resource server and is not routed through this API Gateway. Its public MCP endpoint is exposed through its own Cloudflare Tunnel origin, advertises its own OAuth protected-resource metadata, and validates the Homelab MCP audience and `homelab.read` scope. Its application also enforces a central Webtools identity UUID allowlist.
+
+Do not add a Homelab MCP route, path rewrite or Gateway audience configuration as part of the Kanban MCP routing work. Change this boundary only through an explicit architecture decision that updates the Auth Server, Homelab MCP and deployment configuration together.
+
 ## Project structure
 
 ```
