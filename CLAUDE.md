@@ -46,6 +46,10 @@ Only four classes, all under `com.ikoyski.webtools.apigateway`:
 - Rate limiter key: `key-resolver: "#{@ipKeyResolver}"`; renaming the bean breaks routes.
 - Circuit breaker fallback: `fallbackUri: forward:/fallback/default`.
 
+## Homelab MCP boundary
+
+Homelab Management MCP is not a Gateway route. It is independently exposed through its own Cloudflare Tunnel origin and validates its own OAuth resource audience/scope (`homelab.read`) plus a service-local central-identity allowlist. Do not add a route, path rewrite, audience or scope for Homelab MCP here unless the user explicitly changes the architecture and the Auth Server, MCP service and deployment are updated together.
+
 ## Config and profiles
 
 - `application.yaml`: default; Config Server at `localhost:8089`, hardcoded `user`/`password` (local dev only).
